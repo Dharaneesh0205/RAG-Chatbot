@@ -76,11 +76,12 @@ DEFAULT_SUGGESTIONS = [
 
 class ChatRequest(BaseModel):
     question: str
+    doc_filter: str | None = None
 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    return generate_answer(req.question)
+    return generate_answer(req.question, req.doc_filter)
 
 
 @app.post("/api/upload")

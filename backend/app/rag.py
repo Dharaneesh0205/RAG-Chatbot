@@ -34,11 +34,18 @@ def _get_gemini():
     return _gemini_client
 
 
-def retrieve(question: str, k: int = RETRIEVAL_K) -> list[dict]:
+def retrieve(question: str, k: int = RETRIEVAL_K, doc_filter: str = None) -> list[dict]:
     model = _get_embedding_model()
     collection = _get_collection()
     embedding = model.encode([question]).tolist()
-    results = collection.query(query_embeddings=embedding, n_results=k)
+
+    # If doc_filter provided, only retrieve from that document
+    where = {"source": {"$eq": doc_filter}} if doc_filter else None
+    results = collection.query(
+        query_embeddings=embedding,
+        n_results=k,
+        where=where
+    )
     chunks = []
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
         chunks.append({
@@ -49,8 +56,15 @@ def retrieve(question: str, k: int = RETRIEVAL_K) -> list[dict]:
     return chunks
 
 
-def generate_answer(question: str) -> dict:
-    chunks = retrieve(question)
+FALLBACK_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+]
+
+def generate_answer(question: str, doc_filter: str = None) -> dict:
+    chunks = retrieve(question, doc_filter=doc_filter)
     context = "\n\n".join(
         [f"[{c['source']} — Page {c['page']}]\n{c['text']}" for c in chunks]
     )
@@ -58,11 +72,15 @@ def generate_answer(question: str) -> dict:
     prompt = SYSTEM_PROMPT.format(context=context, question=question)
 
     client = _get_gemini()
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-    )
-    return {"answer": response.text, "sources": sources}
+    last_error = None
+    for model in FALLBACK_MODELS:
+        try:
+            response = client.models.generate_content(model=model, contents=prompt)
+            return {"answer": response.text, "sources": sources}
+        except Exception as e:
+            last_error = e
+            continue
+    return {"answer": f"All models are currently unavailable. Please try again in a moment. ({str(last_error)[:100]})", "sources": []}
 
 
 def ingest_single_file(pdf_path: str, filename: str) -> int:

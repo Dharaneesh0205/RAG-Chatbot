@@ -16,7 +16,7 @@ const mobileMenuBtn = document.getElementById("mobileMenuBtn");
 const sidebar     = document.getElementById("sidebar");
 const newChatBtn  = document.getElementById("newChatBtn");
 const chatListEl  = document.getElementById("chatList");
-const docListEl   = document.getElementById("docList");
+const docListEl   = null; // removed knowledge base tab
 const sidebarMeta = document.getElementById("sidebarMeta");
 const chatTitle   = document.getElementById("chatTitle");
 const chatSubtitle= document.getElementById("chatSubtitle");
@@ -101,12 +101,21 @@ themeToggle.addEventListener("click", () => {
   localStorage.setItem("theme", next);
 });
 
+const sidebarOverlay = document.getElementById("sidebarOverlay");
+
 // ── Sidebar ──
-sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
-mobileMenuBtn.addEventListener("click", () => sidebar.classList.toggle("mobile-open"));
-document.addEventListener("click", (e) => {
-  if (window.innerWidth <= 768 && !sidebar.contains(e.target) && !mobileMenuBtn.contains(e.target))
-    sidebar.classList.remove("mobile-open");
+sidebarToggle.addEventListener("click", (e) => { e.stopPropagation(); sidebar.classList.toggle("collapsed"); });
+
+mobileMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const isOpen = sidebar.classList.contains("mobile-open");
+  sidebar.classList.toggle("mobile-open", !isOpen);
+  sidebarOverlay.classList.toggle("active", !isOpen);
+});
+
+sidebarOverlay.addEventListener("click", () => {
+  sidebar.classList.remove("mobile-open");
+  sidebarOverlay.classList.remove("active");
 });
 
 // ── Input ──
@@ -167,20 +176,19 @@ function getSuggestions(docKey) {
 
 function renderSuggestions(docKey) {
   const suggestions = getSuggestions(docKey);
-  const title = docKey
-    ? `Ask me about ${formatDocName(docKey)}`
-    : "Welcome to the RAG Chatbot";
+  const title = docKey ? `Ask me about ${formatDocName(docKey)}` : "RAG Chatbot Assistant";
   const desc = docKey
-    ? `This chat is scoped to the ${formatDocName(docKey)} document. Ask specific questions and get answers retrieved directly from it.`
-    : "This is a Retrieval-Augmented Generation (RAG) chatbot. Upload company policy PDFs and ask natural language questions — answers are grounded in your documents, not hallucinated.";
+    ? `I'm scoped to the <strong>${formatDocName(docKey)}</strong> document. Ask me anything about it and I'll retrieve answers directly from the source.`
+    : "I'm a RAG (Retrieval-Augmented Generation) chatbot with access to SWS AI company policy documents. Ask me anything — my answers come directly from the documents, not from memory.";
 
   welcomeTitle.textContent = title;
-  welcomeDesc.textContent = desc;
+  welcomeDesc.innerHTML = desc;
+
   chipsEl.innerHTML = "";
   suggestions.forEach(s => {
     const btn = document.createElement("button");
     btn.className = "chip";
-    btn.textContent = `${s.icon} ${s.label}`;
+    btn.innerHTML = `<span style="font-size:16px">${s.icon}</span><span>${s.q}</span>`;
     btn.addEventListener("click", () => {
       input.value = s.q;
       input.dispatchEvent(new Event("input"));
@@ -213,7 +221,14 @@ function renderChatList() {
         </svg>
       </button>`;
     li.addEventListener("click", (e) => {
-      if (!e.target.closest(".chat-item-del")) switchChat(chat.id);
+      if (!e.target.closest(".chat-item-del")) {
+        switchChat(chat.id);
+        // Close sidebar on mobile after selecting chat
+        if (window.innerWidth <= 768) {
+          sidebar.classList.remove("mobile-open");
+          sidebarOverlay.classList.remove("active");
+        }
+      }
     });
     li.querySelector(".chat-item-del").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -236,13 +251,16 @@ newChatBtn.addEventListener("click", () => {
   switchChat(chat.id);
 });
 
-// ── Clear current chat ──
+// ── Clear current chat — only clears display, user must delete chat to remove history ──
 clearBtn.addEventListener("click", () => {
   const chat = chats.find(c => c.id === activeChatId);
-  if (chat) { chat.messages = []; saveChats(); }
+  // Do NOT wipe messages from storage — just scroll to bottom
+  // Only clear if user explicitly wants a fresh view (show welcome again temporarily)
+  if (!chat || chat.messages.length === 0) return;
+  // Re-render all messages (no data loss)
   messagesEl.innerHTML = "";
-  welcomeEl.style.display = "";
-  renderSuggestions(chat?.docKey || null);
+  chat.messages.forEach(m => renderMessage(m.role, m.text, m.sources || [], false));
+  scrollToBottom();
 });
 
 // ── Send ──
@@ -280,7 +298,10 @@ async function sendMessage() {
     const res = await fetch(`${API}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({
+        question,
+        doc_filter: chat?.docKey ? `SWS-AI-${chat.docKey}.pdf` : null
+      }),
     });
     if (!res.ok) throw new Error(`Server error ${res.status}`);
     const data = await res.json();
@@ -467,9 +488,10 @@ async function uploadFiles() {
       }
       if (r.status === "success") {
         newlyUploaded.add(r.filename);
+        // Derive key — strip SWS-AI- prefix and .pdf suffix
+        const key = r.filename.replace(/^SWS-AI-/i, "").replace(/\.pdf$/i, "");
         // Update active chat suggestions based on uploaded doc
-        const key = r.filename.replace("SWS-AI-","").replace(".pdf","");
-        if (DOC_SUGGESTIONS[key] && activeChatId) {
+        if (activeChatId) {
           const chat = chats.find(c => c.id === activeChatId);
           if (chat && chat.messages.length === 0) {
             chat.docKey = key;
@@ -491,7 +513,6 @@ async function uploadFiles() {
       pendingFiles = [];
       inlineQueue.innerHTML = "";
       attachBtn.classList.remove("has-files");
-      loadDocuments();
       isUploading = false;
     }, 2500);
 
@@ -505,43 +526,15 @@ async function uploadFiles() {
   }
 }
 
-// ── Load Documents ──
+// ── Load Documents — just update footer meta ──
 async function loadDocuments() {
   try {
     const res = await fetch(`${API}/api/documents`);
     const data = await res.json();
-    renderDocList(data.documents);
     sidebarMeta.textContent = `${data.documents.length} docs · ChromaDB · Gemini`;
   } catch {
     sidebarMeta.textContent = "Backend offline";
-    docListEl.innerHTML = `<li style="font-size:11px;color:var(--text-3);padding:6px">Start backend first</li>`;
   }
-}
-
-function renderDocList(docs) {
-  docListEl.innerHTML = "";
-  if (!docs.length) {
-    docListEl.innerHTML = `<li style="font-size:11px;color:var(--text-3);padding:6px">No documents yet</li>`;
-    return;
-  }
-  const sorted = [...docs].sort((a, b) => newlyUploaded.has(b) - newlyUploaded.has(a));
-  sorted.forEach(doc => {
-    const key = doc.replace("SWS-AI-", "").replace(".pdf", "");
-    const icon = DOC_ICONS[key] || "📄";
-    const isNew = newlyUploaded.has(doc);
-    const li = document.createElement("li");
-    li.className = `doc-item${isNew ? " new-doc" : ""}`;
-    li.innerHTML = `<span class="doc-icon">${icon}</span><span class="doc-name">${formatDocName(key)}</span>${isNew ? `<span class="doc-badge">NEW</span>` : ""}`;
-    li.addEventListener("click", () => {
-      // Create a new chat scoped to this document
-      document.querySelectorAll(".doc-item").forEach(d => d.classList.remove("active"));
-      li.classList.add("active");
-      const chat = createChat(`${formatDocName(key)} Chat`, key);
-      renderChatList();
-      switchChat(chat.id);
-    });
-    docListEl.appendChild(li);
-  });
 }
 
 // ── Helpers ──
