@@ -1,4 +1,4 @@
-# RAG Chatbot — SWS AI Policy Assistant
+# RAG Chatbot — SWS AI 
 
 A Retrieval-Augmented Generation (RAG) chatbot that lets employees ask natural language questions about SWS AI company policies and receive accurate, grounded answers sourced directly from internal PDF documents — no hallucination.
 
