@@ -3,11 +3,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 from retriever import retrieve
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 app = FastAPI()
 
@@ -18,7 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 SYSTEM_PROMPT = """You are a helpful HR assistant for SWS AI. Answer the employee's question using ONLY the context provided below from company policy documents.
 
@@ -43,7 +42,11 @@ async def chat(req: ChatRequest):
     sources = list(dict.fromkeys(c["source"] for c in chunks))
 
     prompt = SYSTEM_PROMPT.format(context=context) + f"\n\nEmployee question: {req.question}"
-    response = model.generate_content(prompt)
+
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+    )
 
     return {
         "answer": response.text,
