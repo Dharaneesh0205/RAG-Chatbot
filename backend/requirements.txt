@@ -1,12 +1,13 @@
 fastapi
 uvicorn
 python-dotenv
+pymupdf
 pdfplumber
 langchain
 langchain-community
+langchain-text-splitters
 langchain-huggingface
 chromadb
 sentence-transformers
-google-generativeai
-langchain-google-genai
+google-genai
 python-multipart
